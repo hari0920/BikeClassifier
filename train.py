@@ -30,11 +30,12 @@ else:
     train_dir = os.getcwd()+"\\training_images"
     test_dir = os.getcwd()+"\\testing_images"
 #hyperparameters
-learning_rate=0.0001
-epochs=1000
-batch_size=10
+learning_rate=0.001
+epochs=400
+batch_size=20
 patch_size=64
 num_classes=2
+num_parallel_processors=4
 
 #DATA Loading
 #obtain the labels
@@ -51,24 +52,24 @@ test_filenames=glob.glob(test_dir+"\\*"+image_format)
 
 print("Number of Training Images: ",len(training_filenames[0])+len(training_filenames[1]))
 print("Number of Testing Images: ",len(test_filenames))
+
 training_labels=[]
+
+test_labels=[]
+
+test_labels = [0]*len(test_filenames) # won't be used anyway
+
 for file in training_filenames[0]:
-    training_labels.append(0)
+    training_labels.append(0) #mountain bikes
 
 for file in training_filenames[1]:
-    training_labels.append(1)
+    training_labels.append(1) #road bikes
 
 #flattening it.
-training_filenames= [val for sublist in training_filenames for val in sublist]
+training_filenames = [val for sublist in training_filenames for val in sublist]
 #Sanity Checking
-print(len(training_filenames))
-print(len(training_labels))
-
-#Converting to constants
-#training_filenames=tf.constant(training_filenames)
-#training_labels=tf.constant(training_labels)
-#training_filenames=tf.data.Dataset.from_tensor_slices(training_filenames)
-#training_labels=tf.data.Dataset.from_tensor_slices(training_labels).map(lambda z:tf.one_hot(z, 2))
+#print(len(training_filenames))
+#print(len(training_labels))
 
 def process_function(filename,label):
     image_string = tf.read_file(filename)
@@ -78,6 +79,8 @@ def process_function(filename,label):
     return image_resized, label
 
 def train_preprocess(image, label):
+    
+    image = tf.image.per_image_standardization(image)
     image = tf.image.random_flip_left_right(image)
 
     image = tf.image.random_brightness(image, max_delta=32.0 / 255.0)
@@ -90,24 +93,39 @@ def train_preprocess(image, label):
 
 
 #Using TF dataset API
+#Training Dataset
 train_dataset=tf.data.Dataset.from_tensor_slices((training_filenames,training_labels))
 #train_dataset=tf.data.Dataset.zip((training_filenames,training_labels))
 train_dataset=train_dataset.shuffle(len(training_filenames))
-train_dataset=train_dataset.map(process_function,num_parallel_calls=4)
-train_dataset=train_dataset.map(train_preprocess,num_parallel_calls=4)
+train_dataset=train_dataset.map(process_function,num_parallel_calls=num_parallel_processors)
+train_dataset=train_dataset.map(train_preprocess,num_parallel_calls=num_parallel_processors)
 train_dataset=train_dataset.batch(batch_size)
 train_dataset=train_dataset.repeat()
-train_dataset=train_dataset.prefetch(3)
+train_dataset=train_dataset.prefetch(5)
+
+#Testing Dataset
+test_dataset=tf.data.Dataset.from_tensor_slices((test_filenames,test_labels))
+test_dataset=test_dataset.map(process_function,num_parallel_calls=num_parallel_processors)
+test_dataset=test_dataset.batch(len(test_filenames))
+test_dataset=test_dataset.prefetch(1)
 
 # create general iterator
 #print(train_dataset.output_types)
 #print(train_dataset.output_shapes)
-#iterator = tf.data.Iterator.from_structure(train_dataset.output_types,train_dataset.output_shapes)
-iterator=train_dataset.make_initializable_iterator()
+
+#test_iterator=test_dataset.make_initializable_iterator()
+#im=test_iterator.get_next()
+#testing_init_op=test_iterator.initializer
+
+iterator = tf.data.Iterator.from_structure(train_dataset.output_types,train_dataset.output_shapes)
+training_init_op=iterator.make_initializer(train_dataset)
+test_init_op=iterator.make_initializer(test_dataset)
+
+#iterator=train_dataset.make_initializable_iterator()
 images,labels = iterator.get_next()
-# make datasets that we can initialize separately, but using the same structure via the common iterator
-training_init_op = iterator.initializer
-inputs={'images':images,'labels':labels,'iterator_init_op': training_init_op}
+#training_init_op = iterator.initializer
+#inputs={'images':images,'labels':labels,'iterator_init_op': training_init_op}
+inputs={'images':images,'labels':labels}
 
 #defining the model
 def simple_model(inputs):
@@ -128,9 +146,10 @@ optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
 train_op=optimizer.minimize(loss) ##IMPORTANT
 
 #accuracy
-correct_prediction=tf.equal(tf.argmax(logits,1),labels)
-correct_prediction=tf.cast(correct_prediction,tf.float32)
-accuracy=tf.reduce_mean(correct_prediction)
+prediction=tf.equal(tf.argmax(logits,1),labels)
+prediction=tf.cast(prediction,tf.float32)
+pred_prob = tf.reduce_sum(tf.nn.softmax(logits),1)
+accuracy=tf.reduce_mean(prediction)
 
 init = tf.global_variables_initializer()
 with tf.Session() as sess:
@@ -140,3 +159,15 @@ with tf.Session() as sess:
         _,loss_val,acc_val=sess.run([train_op,loss,accuracy])
         if i%50==0:
             print("Epoch number:{}, Loss:{:.3f}, Accuracy:{:.2f}".format(i,loss_val,acc_val))
+
+    print("Training Done")
+    sess.run(test_init_op)
+    pred,prob=sess.run([logits,pred_prob])
+    #For Debugging
+    #print("Actual predictions",pred)
+    pred_classes=np.argmax(pred, 1)
+    print("Testing Done!")
+    print("Class 0: %s, Class 1: %s" % (train_categories[0],train_categories[1]))
+    print("Predicted Classes for each test image: ",pred_classes )
+    #for probability 
+    #print("Probability of class:", prob) 

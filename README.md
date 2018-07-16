@@ -1,5 +1,5 @@
 ## Bike Classifier
 Requires Tensorflow.
-Tested on Ubuntu 16.04
+Tested on Windows 10
 
 Author:Hariharan Ramshankar
