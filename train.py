@@ -27,8 +27,15 @@ if args.test_dir:
     test_dir = args.test_dir
 else:
     print("Assuming train and test images in default directories.")
-    train_dir = os.getcwd()+"\\training_images"
-    test_dir = os.getcwd()+"\\testing_images"
+    if os.name == 'nt':
+      print("Windows OS")
+      train_dir = os.getcwd()+"\\training_images"
+      test_dir = os.getcwd()+"\\testing_images"
+    else:
+      print("Linux System")
+      train_dir = os.getcwd()+"/training_images"
+      test_dir = os.getcwd()+"/testing_images"
+      
 #hyperparameters
 learning_rate=0.001
 epochs=400
@@ -45,10 +52,17 @@ training_filenames =[]
 image_format=".jpg"
 category=0
 #obtain list of all filepaths
-for i in train_categories:
-    training_filenames.append(glob.glob(train_dir+"\\"+i+"\\*"+image_format))
+if os.name == 'nt':
+    for i in train_categories:
+        training_filenames.append(
+            glob.glob(train_dir+"\\"+i+"\\*"+image_format))
 
-test_filenames=glob.glob(test_dir+"\\*"+image_format)
+    test_filenames = glob.glob(test_dir+"\\*"+image_format)
+else:
+    for i in train_categories:
+        training_filenames.append(glob.glob(train_dir+"/"+i+"/*"+image_format))
+
+    test_filenames = glob.glob(test_dir+"/*"+image_format)
 
 print("Number of Training Images: ",len(training_filenames[0])+len(training_filenames[1]))
 print("Number of Testing Images: ",len(test_filenames))
