@@ -13,7 +13,6 @@ import cv2
 #from tensorflow.python.framework import ops
 #from tensorflow.python.framework import dtypes
 
-
 """Create a simple parser to handle our custom(optional) inputs, if given"""
 parser = argparse.ArgumentParser()
 parser.add_argument("--train_dir", help="path to training images directory")
@@ -30,11 +29,13 @@ else:
     train_dir = os.getcwd()+"\\training_images"
     test_dir = os.getcwd()+"\\testing_images"
 #hyperparameters
-learning_rate=0.0001
-epochs=1000
+
+learning_rate=0.001
+epochs=500
 batch_size=10
-patch_size=64
+patch_size=512
 num_classes=2
+num_parallel_processors=4
 
 #DATA Loading
 #obtain the labels
@@ -63,19 +64,22 @@ training_filenames= [val for sublist in training_filenames for val in sublist]
 #Sanity Checking
 print(len(training_filenames))
 print(len(training_labels))
-
-#Converting to constants
-#training_filenames=tf.constant(training_filenames)
-#training_labels=tf.constant(training_labels)
-#training_filenames=tf.data.Dataset.from_tensor_slices(training_filenames)
-#training_labels=tf.data.Dataset.from_tensor_slices(training_labels).map(lambda z:tf.one_hot(z, 2))
+print(len(test_filenames))
 
 def process_function(filename,label):
     image_string = tf.read_file(filename)
     image_read = tf.image.decode_jpeg(image_string,channels=3)
     image_read=tf.image.convert_image_dtype(image_read,tf.float32)
-    image_resized = tf.image.resize_images(image_read, [256,256])
+    image_resized = tf.image.resize_images(image_read, [patch_size,patch_size])
     return image_resized, label
+
+
+def process_function_test(filename):
+    image_string = tf.read_file(filename)
+    image_read = tf.image.decode_jpeg(image_string,channels=3)
+    image_read=tf.image.convert_image_dtype(image_read,tf.float32)
+    image_resized = tf.image.resize_images(image_read, [patch_size,patch_size])
+    return image_resized
 
 def train_preprocess(image, label):
     image = tf.image.random_flip_left_right(image)
@@ -93,29 +97,37 @@ def train_preprocess(image, label):
 train_dataset=tf.data.Dataset.from_tensor_slices((training_filenames,training_labels))
 #train_dataset=tf.data.Dataset.zip((training_filenames,training_labels))
 train_dataset=train_dataset.shuffle(len(training_filenames))
-train_dataset=train_dataset.map(process_function,num_parallel_calls=4)
-train_dataset=train_dataset.map(train_preprocess,num_parallel_calls=4)
+train_dataset=train_dataset.map(process_function,num_parallel_calls=num_parallel_processors)
+train_dataset=train_dataset.map(train_preprocess,num_parallel_calls=num_parallel_processors)
 train_dataset=train_dataset.batch(batch_size)
 train_dataset=train_dataset.repeat()
 train_dataset=train_dataset.prefetch(3)
 
-# create general iterator
-#print(train_dataset.output_types)
-#print(train_dataset.output_shapes)
-#iterator = tf.data.Iterator.from_structure(train_dataset.output_types,train_dataset.output_shapes)
-iterator=train_dataset.make_initializable_iterator()
-images,labels = iterator.get_next()
-# make datasets that we can initialize separately, but using the same structure via the common iterator
-training_init_op = iterator.initializer
+#test
+test_dataset=tf.data.Dataset.from_tensor_slices(test_filenames)
+test_dataset=test_dataset.map(process_function_test,num_parallel_calls=num_parallel_processors)
+test_dataset=test_dataset.prefetch(3)
+
+train_iterator=train_dataset.make_initializable_iterator()
+test_iterator=test_dataset.make_initializable_iterator()
+
+images,labels = train_iterator.get_next()
+images_t = test_iterator.get_next()
+
+training_init_op = train_iterator.initializer
+testing_init_op = test_iterator.initializer
+
 inputs={'images':images,'labels':labels,'iterator_init_op': training_init_op}
 
 #defining the model
+num_conv_layers=3
 def simple_model(inputs):
     out=inputs["images"]
-    out=tf.layers.conv2d(out,16,3,padding='same')
-    out=tf.nn.relu(out)
-    out=tf.layers.max_pooling2d(out,2,2)
-    out=tf.reshape(out,[-1,128*128*16])
+    out=tf.layers.conv2d(out,32,3,padding='same') # 3x3 convolution
+    out=tf.nn.relu(out) #relu
+    out=tf.layers.max_pooling2d(out,2,2) # max pooling
+    #out=tf.reshape(out,[-1,patch_size*patch_size*16])
+    out=tf.layers.Flatten()(out)
     out_logits=tf.layers.dense(out,num_classes)
     return out_logits
 
@@ -139,4 +151,5 @@ with tf.Session() as sess:
     for i in range(epochs):
         _,loss_val,acc_val=sess.run([train_op,loss,accuracy])
         if i%50==0:
-            print("Epoch number:{}, Loss:{:.3f}, Accuracy:{:.2f}".format(i,loss_val,acc_val))
+            print("Epoch number:{}, Loss:{:.3f}, Accuracy:{:.2f}".format(i,loss_val,acc_val))   
+    #TODO:Test data classification and accuracy calculation
