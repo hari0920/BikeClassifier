@@ -26,8 +26,15 @@ if args.test_dir:
     test_dir = args.test_dir
 else:
     print("Assuming train and test images in default directories.")
-    train_dir = os.getcwd()+"\\training_images"
-    test_dir = os.getcwd()+"\\testing_images"
+    if os.name == 'nt':
+      print("Windows OS")
+      train_dir = os.getcwd()+"\\training_images"
+      test_dir = os.getcwd()+"\\testing_images"
+    else:
+      print("Linux System")
+      train_dir = os.getcwd()+"/training_images"
+      test_dir = os.getcwd()+"/testing_images"
+      
 #hyperparameters
 
 learning_rate=0.001
@@ -45,22 +52,35 @@ training_filenames =[]
 image_format=".jpg"
 category=0
 #obtain list of all filepaths
-for i in train_categories:
-    training_filenames.append(glob.glob(train_dir+"\\"+i+"\\*"+image_format))
+if os.name == 'nt':
+    for i in train_categories:
+        training_filenames.append(
+            glob.glob(train_dir+"\\"+i+"\\*"+image_format))
 
-test_filenames=glob.glob(test_dir+"\\*"+image_format)
+    test_filenames = glob.glob(test_dir+"\\*"+image_format)
+else:
+    for i in train_categories:
+        training_filenames.append(glob.glob(train_dir+"/"+i+"/*"+image_format))
+
+    test_filenames = glob.glob(test_dir+"/*"+image_format)
 
 print("Number of Training Images: ",len(training_filenames[0])+len(training_filenames[1]))
 print("Number of Testing Images: ",len(test_filenames))
+
 training_labels=[]
+
+test_labels=[]
+
+test_labels = [0]*len(test_filenames) # won't be used anyway
+
 for file in training_filenames[0]:
-    training_labels.append(0)
+    training_labels.append(0) #mountain bikes
 
 for file in training_filenames[1]:
-    training_labels.append(1)
+    training_labels.append(1) #road bikes
 
 #flattening it.
-training_filenames= [val for sublist in training_filenames for val in sublist]
+training_filenames = [val for sublist in training_filenames for val in sublist]
 #Sanity Checking
 print(len(training_filenames))
 print(len(training_labels))
@@ -82,6 +102,8 @@ def process_function_test(filename):
     return image_resized
 
 def train_preprocess(image, label):
+    
+    image = tf.image.per_image_standardization(image)
     image = tf.image.random_flip_left_right(image)
 
     image = tf.image.random_brightness(image, max_delta=32.0 / 255.0)
@@ -94,6 +116,7 @@ def train_preprocess(image, label):
 
 
 #Using TF dataset API
+#Training Dataset
 train_dataset=tf.data.Dataset.from_tensor_slices((training_filenames,training_labels))
 #train_dataset=tf.data.Dataset.zip((training_filenames,training_labels))
 train_dataset=train_dataset.shuffle(len(training_filenames))
@@ -101,7 +124,13 @@ train_dataset=train_dataset.map(process_function,num_parallel_calls=num_parallel
 train_dataset=train_dataset.map(train_preprocess,num_parallel_calls=num_parallel_processors)
 train_dataset=train_dataset.batch(batch_size)
 train_dataset=train_dataset.repeat()
-train_dataset=train_dataset.prefetch(3)
+train_dataset=train_dataset.prefetch(5)
+
+#Testing Dataset
+test_dataset=tf.data.Dataset.from_tensor_slices((test_filenames,test_labels))
+test_dataset=test_dataset.map(process_function,num_parallel_calls=num_parallel_processors)
+test_dataset=test_dataset.batch(len(test_filenames))
+test_dataset=test_dataset.prefetch(1)
 
 #test
 test_dataset=tf.data.Dataset.from_tensor_slices(test_filenames)
@@ -140,9 +169,10 @@ optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
 train_op=optimizer.minimize(loss) ##IMPORTANT
 
 #accuracy
-correct_prediction=tf.equal(tf.argmax(logits,1),labels)
-correct_prediction=tf.cast(correct_prediction,tf.float32)
-accuracy=tf.reduce_mean(correct_prediction)
+prediction=tf.equal(tf.argmax(logits,1),labels)
+prediction=tf.cast(prediction,tf.float32)
+pred_prob = tf.reduce_sum(tf.nn.softmax(logits),1)
+accuracy=tf.reduce_mean(prediction)
 
 init = tf.global_variables_initializer()
 with tf.Session() as sess:
